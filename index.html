@@ -40,10 +40,14 @@ button:disabled{opacity:.5}
 #ov h2{font-size:30px;margin:0 0 10px}
 #cnt{font-size:130px;font-weight:800;line-height:1.1}
 #ov button{background:#fff;color:#b00;max-width:420px;width:100%}
+#fb{background:rgba(26,29,46,.97)}
+#fb h2{font-size:28px;margin:0 0 10px}
+#fb button{background:#fff;color:var(--pri);max-width:420px;width:100%}
 .photos{display:flex;flex-wrap:wrap;gap:10px;margin:10px 0 4px}
 .ph{position:relative}
 .ph img{width:96px;height:96px;object-fit:cover;border-radius:8px;margin:0;display:block}
 .ph button{position:absolute;top:-8px;right:-8px;padding:0;width:26px;height:26px;border-radius:50%;background:#c62828}
+.fmsg{color:var(--bad);font-weight:700;font-size:14px;min-height:20px}
 #cam{background:rgba(0,0,0,.92)}
 #cam video{max-width:100%;max-height:68dvh;border-radius:12px;background:#000}
 #cam .bt{display:flex;gap:10px;width:100%;max-width:420px;margin-top:12px}
@@ -61,9 +65,9 @@ button:disabled{opacity:.5}
   <div class="hero"><h1 id="title"></h1><div id="status"></div></div>
   <div class="card"><div class="sec">입장 정보</div>
     <div class="row3">
-      <div><label for="sid">학번 (5자리 숫자)</label><input id="sid" inputmode="numeric" maxlength="5" autocomplete="off"></div>
+      <div><label for="sid">학번 (5자리 숫자)</label><input id="sid" inputmode="numeric" pattern="[0-9]*" maxlength="5" autocomplete="off"></div>
       <div><label for="nm">이름</label><input id="nm" autocomplete="off"></div>
-      <div><label for="pin">입장 PIN (칠판 안내, 4자리)</label><input id="pin" inputmode="numeric" maxlength="4" autocomplete="off"></div>
+      <div><label for="pin">입장 PIN (칠판 안내, 4자리)</label><input id="pin" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off"></div>
     </div>
     <div class="err" id="err"></div>
     <button id="go">평가 시작하기</button>
@@ -105,6 +109,12 @@ button:disabled{opacity:.5}
   <button id="back">시험 화면으로 복귀</button>
 </div>
 
+<div id="fb" class="overlay hide">
+  <h2>전체화면으로 돌아가세요</h2>
+  <p>파일 선택이 끝났습니다. 15초 안에 아래 버튼을 눌러 주세요.<br>시간이 지나면 이탈로 기록됩니다.</p>
+  <button id="fbgo">전체화면 복귀</button>
+</div>
+
 <div id="cf" class="overlay hide">
   <div class="card">
     <div class="sec">제출하시겠습니까?</div>
@@ -122,6 +132,11 @@ const $ = i => document.getElementById(i);
 const EXAM = new URLSearchParams(location.search).get('id');
 const CODES = {NOEXAM:'존재하지 않는 시험입니다.',FORM:'학번·이름 형식을 확인하세요.',NOT_OPEN:'아직 시작 전입니다.',CLOSED:'마감되었습니다.',
   PIN:'입장 PIN이 올바르지 않습니다.',DUP:'이미 제출 기록이 있어 다시 응시할 수 없습니다.',ENTERED:'이미 입장 기록이 있습니다. 교사에게 문의하세요.'};
+
+/* ── 학번·PIN: 숫자만 입력 가능 ── */
+['sid', 'pin'].forEach(id => $(id).addEventListener('input', e => {
+  e.target.value = e.target.value.replace(/\D/g, '').slice(0, id === 'sid' ? 5 : 4);
+}));
 
 /* ── 서버 시간 동기화 (태블릿 시계 무시, 경과시간은 performance.now 사용) ── */
 const T = {base:0, t0:0};
@@ -161,7 +176,7 @@ async function enterFS() {
 function exitFS() { try { (document.exitFullscreen || document.webkitExitFullscreen).call(document); } catch (e) {} }
 
 /* ── 입장 ── */
-let user = null, started = false, armed = false, locked = false, busy = false;
+let user = null, started = false, armed = false, locked = false, busy = false, picking = false;
 let closeMs = null, tm = null, v = 0, notes = [], payload = null;
 const err = m => $('err').textContent = m;
 
@@ -170,7 +185,7 @@ $('go').onclick = async () => {
   if (!/^\d{5}$/.test(sid)) return err('학번은 5자리 숫자로 입력하세요.');
   if (!name) return err('이름을 입력하세요.');
   if (!/^\d{4}$/.test(pin)) return err('PIN은 4자리 숫자입니다.');
-  if (cfg.photo && !camReady) {   // 사진 문항이 있으면 시험 시작 전에 카메라 권한을 미리 받아 둠
+  if (cfg.photo && !camReady) {   // 카메라 촬영 문항이 있으면 시험 시작 전에 카메라 권한을 미리 받아 둠
     try { await camPerm(); camReady = true; err('카메라가 확인되었습니다. [평가 시작하기]를 한 번 더 눌러 주세요.'); }
     catch (e) { err('이 평가는 카메라가 필요합니다. 카메라 권한을 허용해 주세요.'); }
     return;
@@ -196,15 +211,18 @@ function tick() {
 }
 
 /* ── 입력 보안 ── */
-const tas = [], photos = [], phList = [], phAdd = []; let qlist = [], camStream = null, camQ = null, camReady = false;
+const tas = [], photos = [], phList = [], phAdd = [], fmsg = []; let qlist = [], camStream = null, camQ = null, camReady = false;
 ['copy','cut','paste','contextmenu','dragstart','drop'].forEach(t => document.addEventListener(t, e => e.preventDefault()));
 document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && 'cvxa'.includes(e.key.toLowerCase())) e.preventDefault(); });
-function render(j) {   // 문항별 입력칸(글/사진) 생성
+function render(j) {   // 문항별 입력칸(글/사진/파일) 생성
   qlist = j.questions || [];
   if (j.intro) { $('intro').textContent = j.intro; $('intro').classList.remove('hide'); }
   if (j.introImg) { $('qi').src = j.introImg; $('qi').classList.remove('hide'); }
   qlist.forEach((q, i) => {
     const ty = q.type || 'text';
+    const hasTxt = ty !== 'photo' && ty !== 'file';                    // 글 입력칸이 있는 유형
+    const hasCam = ty === 'photo' || ty === 'both';                    // 카메라 촬영
+    const hasFile = ty === 'file' || ty === 'bothfile';                // 사진첩 파일 선택
     const d = document.createElement('div'); d.className = 'card';
     const hd = document.createElement('div'); hd.className = 'sec';
     hd.textContent = (qlist.length > 1 ? '문항 ' + q.no : '문제') + (q.pts ? ' (' + q.pts + '점)' : '');
@@ -212,7 +230,7 @@ function render(j) {   // 문항별 입력칸(글/사진) 생성
     d.append(hd, p);
     if (q.img) { const im = document.createElement('img'); im.src = q.img; im.alt = '문제 이미지'; d.append(im); }
     photos.push([]);
-    if (ty === 'photo') tas.push({value: '', disabled: false});
+    if (!hasTxt) tas.push({value: '', disabled: false});
     else {
       const t = document.createElement('textarea'); t.className = 'ta'; t.placeholder = '여기에 답안을 작성하세요.';
       t.spellcheck = false; t.autocomplete = 'off'; t.setAttribute('autocorrect', 'off'); t.setAttribute('autocapitalize', 'off');
@@ -225,13 +243,25 @@ function render(j) {   // 문항별 입력칸(글/사진) 생성
       });
       d.append(t, c); tas.push(t);
     }
-    if (ty !== 'text') {
-      const add = document.createElement('button'); add.type = 'button'; add.className = 'sub'; add.textContent = '📷 사진 촬영';
-      add.onclick = () => openCam(i);
+    if (hasCam || hasFile) {
+      const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'sub';
       const list = document.createElement('div'); list.className = 'photos';
       const note = document.createElement('div'); note.className = 'len'; note.style.textAlign = 'left';
-      note.textContent = '답안이 잘 보이게 찍어 주세요. 이름·학번이 사진에 나오지 않게 하세요. (최대 ' + q.maxPhotos + '장)';
-      d.append(add, list, note); phAdd[i] = add; phList[i] = list;
+      const msg = document.createElement('div'); msg.className = 'fmsg';
+      if (hasCam) {
+        btn.textContent = '📷 사진 촬영'; btn.onclick = () => openCam(i);
+        note.textContent = '답안이 잘 보이게 찍어 주세요. 이름·학번이 사진에 나오지 않게 하세요. (최대 ' + q.maxPhotos + '장)';
+        d.append(btn);
+      } else {
+        const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'image/*'; inp.multiple = true; inp.className = 'hide';
+        btn.textContent = '🖼 사진첩에서 파일 선택';
+        btn.onclick = () => { if (locked) return; startPick(); inp.value = ''; inp.click(); };
+        inp.addEventListener('change', () => { endPick(); addFiles(i, Array.from(inp.files)); });
+        inp.addEventListener('cancel', endPick);
+        note.textContent = '시험 전에 저장해 둔 이미지를 선택하세요. 이름·학번이 이미지에 나오지 않게 하세요. (최대 ' + q.maxPhotos + '장)';
+        d.append(btn, inp);
+      }
+      d.append(list, msg, note); phAdd[i] = btn; phList[i] = list; fmsg[i] = msg;
     }
     $('qs').append(d);
   });
@@ -248,7 +278,64 @@ function drawPh(i) {
   phAdd[i].disabled = photos[i].length >= qlist[i].maxPhotos;
 }
 
-/* ── 카메라 (페이지 안에서 직접 촬영: 앱 전환이 없어 이탈로 감지되지 않음, 갤러리 업로드 불가) ── */
+/* ── 사진첩 파일 선택 (선택창이 열려 있는 동안만 이탈 감지를 잠시 멈춤) ── */
+let pkT = null, fbT = null;
+function startPick() { picking = true; clearTimeout(pkT); pkT = setTimeout(endPick, 120000); }   // 2분 안전장치
+function endPick() {
+  clearTimeout(pkT);
+  setTimeout(() => {   // 선택창이 닫힌 직후 늦게 도착하는 이벤트를 흡수한 뒤 복귀 확인
+    if (!picking) return;
+    picking = false;
+    if (!locked && !fsEl()) showFb();
+  }, 700);
+}
+window.addEventListener('focus', () => { if (picking) setTimeout(endPick, 1500); });
+function showFb() {
+  $('fb').classList.remove('hide'); clearTimeout(fbT);
+  fbT = setTimeout(() => { $('fb').classList.add('hide'); leave('파일 선택 후 전체화면 복귀 지연'); }, 15000);
+}
+$('fbgo').onclick = async () => {
+  try { await enterFS(); } catch (e) { return; }
+  clearTimeout(fbT); $('fb').classList.add('hide');
+};
+const stamp = ms => {
+  if (!ms) return '알 수 없음';
+  const d = new Date(ms), p = n => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+};
+function shrink(f) {   // 긴 변 1600px, JPEG로 줄여서 업로드 용량 절약
+  return new Promise((res, rej) => {
+    const u = URL.createObjectURL(f), im = new Image();
+    im.onload = () => {
+      const sc = Math.min(1, 1600 / Math.max(im.width, im.height)), c = document.createElement('canvas');
+      c.width = Math.round(im.width * sc); c.height = Math.round(im.height * sc);
+      const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+      g.drawImage(im, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(u); res(c.toDataURL('image/jpeg', 0.75));
+    };
+    im.onerror = () => { URL.revokeObjectURL(u); rej(new Error('img')); };
+    im.src = u;
+  });
+}
+async function addFiles(i, files) {
+  const q = qlist[i], msg = fmsg[i];
+  for (const f of files) {
+    if (locked) return;
+    if (photos[i].length >= q.maxPhotos) { msg.textContent = '최대 ' + q.maxPhotos + '장까지 올릴 수 있습니다.'; break; }
+    if (!/^image\//.test(f.type)) { msg.textContent = '이미지 파일만 올릴 수 있습니다.'; continue; }
+    msg.textContent = '업로드 중…';
+    try {
+      const url = await shrink(f);
+      const j = await api({action:'photo', mode:'file', id:EXAM, sid:user.sid, token:user.token, q:q.no, lm:f.lastModified || 0, data:url.split(',')[1]});
+      if (!j.ok) throw 0;
+      photos[i].push({fid:j.fid, url}); drawPh(i);
+      notes.push('문항' + q.no + ' 파일 저장시각 ' + stamp(f.lastModified));
+      msg.textContent = '';
+    } catch (e) { msg.textContent = '업로드에 실패했습니다. 다시 선택하세요.'; }
+  }
+}
+
+/* ── 카메라 (페이지 안에서 직접 촬영: 앱 전환이 없어 이탈로 감지되지 않음) ── */
 async function camPerm() {
   const s = await navigator.mediaDevices.getUserMedia({video: true, audio: false});
   s.getTracks().forEach(t => t.stop());
@@ -284,7 +371,7 @@ $('camshot').onclick = async () => {
 /* ── 이탈 감지 (1회 경고 → 2회 즉시 잠금) ── */
 let ovT = null, dl = 0;
 function leave(why) {
-  if (!started || !armed || locked || busy) return;
+  if (!started || !armed || locked || busy || picking) return;   // picking: 파일 선택창이 열려 있는 동안은 감지하지 않음
   busy = true; v++; notes.push('이탈' + v + ': ' + why);   // busy: 복귀 전까지 중복 이벤트 무시
   if (v >= 2) return finish('이탈강제');
   $('ovmsg').textContent = ''; $('ov').classList.remove('hide');
@@ -323,9 +410,9 @@ $('yes').onclick = () => finish('정상');
 const mk = kind => ({action:'submit', id:EXAM, sid:user.sid, name:user.name, token:user.token, answers:tas.map(t => t.value), photos:photos.map(a => a.map(x => x.fid)), kind, note:notes.join(' / ')});
 
 async function finish(kind) {
-  if (locked) return; locked = true;
-  clearInterval(tm); clearInterval(ovT); tas.forEach(t => t.disabled = true); phAdd.forEach(b => b && (b.disabled = true)); closeCam();
-  $('ov').classList.add('hide'); $('cf').classList.add('hide');
+  if (locked) return; locked = true; picking = false;
+  clearInterval(tm); clearInterval(ovT); clearTimeout(fbT); tas.forEach(t => t.disabled = true); phAdd.forEach(b => b && (b.disabled = true)); closeCam();
+  $('ov').classList.add('hide'); $('cf').classList.add('hide'); $('fb').classList.add('hide');
   payload = mk(kind); window._kind = kind; show('v-end'); send();
 }
 async function send() {
