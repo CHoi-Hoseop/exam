@@ -40,6 +40,14 @@ button:disabled{opacity:.5}
 #ov h2{font-size:30px;margin:0 0 10px}
 #cnt{font-size:130px;font-weight:800;line-height:1.1}
 #ov button{background:#fff;color:#b00;max-width:420px;width:100%}
+.photos{display:flex;flex-wrap:wrap;gap:10px;margin:10px 0 4px}
+.ph{position:relative}
+.ph img{width:96px;height:96px;object-fit:cover;border-radius:8px;margin:0;display:block}
+.ph button{position:absolute;top:-8px;right:-8px;padding:0;width:26px;height:26px;border-radius:50%;background:#c62828}
+#cam{background:rgba(0,0,0,.92)}
+#cam video{max-width:100%;max-height:68dvh;border-radius:12px;background:#000}
+#cam .bt{display:flex;gap:10px;width:100%;max-width:420px;margin-top:12px}
+#cam .bt button{flex:1}
 #cf{background:#000a}
 #cf .card{margin:0;color:var(--ink);max-width:460px;width:100%}
 #cf button{width:100%;margin-top:10px}
@@ -83,6 +91,12 @@ button:disabled{opacity:.5}
   <button id="retry" class="hide">다시 전송</button>
 </div></div>
 
+<div id="cam" class="overlay hide">
+  <video id="camv" autoplay playsinline muted></video>
+  <p id="cammsg" style="min-height:24px;margin:8px 0 0"></p>
+  <div class="bt"><button id="camshot">📸 촬영</button><button id="camx" class="sub">취소</button></div>
+</div>
+
 <div id="ov" class="overlay hide">
   <h2>⚠ 평가 화면을 벗어났습니다</h2>
   <p>5초 안에 아래 버튼을 눌러 복귀하세요.<br>시간이 지나거나 다시 이탈하면 즉시 자동 제출·잠금됩니다.</p>
@@ -102,7 +116,7 @@ button:disabled{opacity:.5}
 
 <script>
 // ★ Apps Script 웹앱 배포 URL을 한 번만 붙여 넣으세요 (시험마다 수정 불필요)
-const API_URL = 'https://script.google.com/macros/s/AKfycbywLyrrZjUaalJDb2GmoGvuD4u2xEosHvzoAuem3lvVJykjyc470WCgYjoR2mmmPdisPA/exec';
+const API_URL = 'https://script.google.com/macros/s/여기에_배포ID/exec';
 
 const $ = i => document.getElementById(i);
 const EXAM = new URLSearchParams(location.search).get('id');
@@ -156,6 +170,11 @@ $('go').onclick = async () => {
   if (!/^\d{5}$/.test(sid)) return err('학번은 5자리 숫자로 입력하세요.');
   if (!name) return err('이름을 입력하세요.');
   if (!/^\d{4}$/.test(pin)) return err('PIN은 4자리 숫자입니다.');
+  if (cfg.photo && !camReady) {   // 사진 문항이 있으면 시험 시작 전에 카메라 권한을 미리 받아 둠
+    try { await camPerm(); camReady = true; err('카메라가 확인되었습니다. [평가 시작하기]를 한 번 더 눌러 주세요.'); }
+    catch (e) { err('이 평가는 카메라가 필요합니다. 카메라 권한을 허용해 주세요.'); }
+    return;
+  }
   $('go').disabled = true; err('확인 중…');
   try { await enterFS(); } catch (e) { err('전체화면을 허용해야 시작할 수 있습니다.'); return updEntry(); }
   let j;
@@ -177,32 +196,90 @@ function tick() {
 }
 
 /* ── 입력 보안 ── */
-const tas = []; let qlist = [];
+const tas = [], photos = [], phList = [], phAdd = []; let qlist = [], camStream = null, camQ = null, camReady = false;
 ['copy','cut','paste','contextmenu','dragstart','drop'].forEach(t => document.addEventListener(t, e => e.preventDefault()));
 document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && 'cvxa'.includes(e.key.toLowerCase())) e.preventDefault(); });
-function render(j) {   // 문항별 입력칸 생성
+function render(j) {   // 문항별 입력칸(글/사진) 생성
   qlist = j.questions || [];
   if (j.intro) { $('intro').textContent = j.intro; $('intro').classList.remove('hide'); }
   if (j.introImg) { $('qi').src = j.introImg; $('qi').classList.remove('hide'); }
-  qlist.forEach(q => {
+  qlist.forEach((q, i) => {
+    const ty = q.type || 'text';
     const d = document.createElement('div'); d.className = 'card';
     const hd = document.createElement('div'); hd.className = 'sec';
     hd.textContent = (qlist.length > 1 ? '문항 ' + q.no : '문제') + (q.pts ? ' (' + q.pts + '점)' : '');
     const p = document.createElement('div'); p.className = 'qt'; p.textContent = q.text;
     d.append(hd, p);
     if (q.img) { const im = document.createElement('img'); im.src = q.img; im.alt = '문제 이미지'; d.append(im); }
-    const t = document.createElement('textarea'); t.className = 'ta'; t.placeholder = '여기에 답안을 작성하세요.';
-    t.spellcheck = false; t.autocomplete = 'off'; t.setAttribute('autocorrect', 'off'); t.setAttribute('autocapitalize', 'off');
-    const c = document.createElement('div'); c.className = 'len'; c.textContent = '0자';
-    let prev = '';
-    t.addEventListener('beforeinput', e => { if (/Paste|Drop/.test(e.inputType || '')) e.preventDefault(); });
-    t.addEventListener('input', () => {   // 클립보드 등으로 한꺼번에 길게 들어오면 되돌림
-      if (t.value.length - prev.length > 20) t.value = prev;
-      prev = t.value; c.textContent = t.value.length.toLocaleString() + '자';
-    });
-    d.append(t, c); $('qs').append(d); tas.push(t);
+    photos.push([]);
+    if (ty === 'photo') tas.push({value: '', disabled: false});
+    else {
+      const t = document.createElement('textarea'); t.className = 'ta'; t.placeholder = '여기에 답안을 작성하세요.';
+      t.spellcheck = false; t.autocomplete = 'off'; t.setAttribute('autocorrect', 'off'); t.setAttribute('autocapitalize', 'off');
+      const c = document.createElement('div'); c.className = 'len'; c.textContent = '0자';
+      let prev = '';
+      t.addEventListener('beforeinput', e => { if (/Paste|Drop/.test(e.inputType || '')) e.preventDefault(); });
+      t.addEventListener('input', () => {   // 클립보드 등으로 한꺼번에 길게 들어오면 되돌림
+        if (t.value.length - prev.length > 20) t.value = prev;
+        prev = t.value; c.textContent = t.value.length.toLocaleString() + '자';
+      });
+      d.append(t, c); tas.push(t);
+    }
+    if (ty !== 'text') {
+      const add = document.createElement('button'); add.type = 'button'; add.className = 'sub'; add.textContent = '📷 사진 촬영';
+      add.onclick = () => openCam(i);
+      const list = document.createElement('div'); list.className = 'photos';
+      const note = document.createElement('div'); note.className = 'len'; note.style.textAlign = 'left';
+      note.textContent = '답안이 잘 보이게 찍어 주세요. 이름·학번이 사진에 나오지 않게 하세요. (최대 ' + q.maxPhotos + '장)';
+      d.append(add, list, note); phAdd[i] = add; phList[i] = list;
+    }
+    $('qs').append(d);
   });
 }
+function drawPh(i) {
+  const L = phList[i]; L.innerHTML = '';
+  photos[i].forEach((ph, k) => {
+    const w = document.createElement('div'); w.className = 'ph';
+    const im = document.createElement('img'); im.src = ph.url;
+    const x = document.createElement('button'); x.type = 'button'; x.textContent = '✕';
+    x.onclick = () => { if (locked) return; photos[i].splice(k, 1); drawPh(i); };
+    w.append(im, x); L.append(w);
+  });
+  phAdd[i].disabled = photos[i].length >= qlist[i].maxPhotos;
+}
+
+/* ── 카메라 (페이지 안에서 직접 촬영: 앱 전환이 없어 이탈로 감지되지 않음, 갤러리 업로드 불가) ── */
+async function camPerm() {
+  const s = await navigator.mediaDevices.getUserMedia({video: true, audio: false});
+  s.getTracks().forEach(t => t.stop());
+}
+async function openCam(i) {
+  if (locked) return;
+  camQ = i; $('cammsg').textContent = ''; $('cam').classList.remove('hide');
+  try {
+    camStream = await navigator.mediaDevices.getUserMedia({video: {facingMode: {ideal: 'environment'}, width: {ideal: 1920}}, audio: false});
+    $('camv').srcObject = camStream;
+  } catch (e) { $('cammsg').textContent = '카메라를 열 수 없습니다. 권한을 확인하세요.'; }
+}
+function closeCam() {
+  if (camStream) { camStream.getTracks().forEach(t => t.stop()); camStream = null; }
+  $('camv').srcObject = null; $('cam').classList.add('hide'); camQ = null;
+}
+$('camx').onclick = closeCam;
+$('camshot').onclick = async () => {
+  const v = $('camv'), i = camQ; if (!camStream || !v.videoWidth || i == null) return;
+  const sc = Math.min(1, 1280 / Math.max(v.videoWidth, v.videoHeight)), c = document.createElement('canvas');
+  c.width = Math.round(v.videoWidth * sc); c.height = Math.round(v.videoHeight * sc);
+  c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+  const url = c.toDataURL('image/jpeg', 0.7);
+  $('cammsg').textContent = '업로드 중…'; $('camshot').disabled = true;
+  try {
+    const j = await api({action:'photo', id:EXAM, sid:user.sid, token:user.token, q:qlist[i].no, data:url.split(',')[1]});
+    if (!j.ok) throw 0;
+    photos[i].push({fid:j.fid, url}); drawPh(i); closeCam();
+  } catch (e) { $('cammsg').textContent = '업로드에 실패했습니다. 다시 촬영하세요.'; }
+  $('camshot').disabled = false;
+};
 
 /* ── 이탈 감지 (1회 경고 → 2회 즉시 잠금) ── */
 let ovT = null, dl = 0;
@@ -237,17 +314,17 @@ window.addEventListener('pagehide', () => {   // 새로고침·닫기: 현재 �
 
 /* ── 제출 ── */
 $('submit').onclick = () => {
-  const e = tas.filter(t => !t.value.trim()).length;
+  const e = tas.filter((t, i) => !t.value.trim() && !photos[i].length).length;
   $('cfmsg').textContent = (e ? '미작성 문항이 ' + e + '개 있습니다. ' : '') + '제출 후에는 수정할 수 없습니다.';
   $('cf').classList.remove('hide');
 };
 $('no').onclick = () => $('cf').classList.add('hide');
 $('yes').onclick = () => finish('정상');
-const mk = kind => ({action:'submit', id:EXAM, sid:user.sid, name:user.name, token:user.token, answers:tas.map(t => t.value), kind, note:notes.join(' / ')});
+const mk = kind => ({action:'submit', id:EXAM, sid:user.sid, name:user.name, token:user.token, answers:tas.map(t => t.value), photos:photos.map(a => a.map(x => x.fid)), kind, note:notes.join(' / ')});
 
 async function finish(kind) {
   if (locked) return; locked = true;
-  clearInterval(tm); clearInterval(ovT); tas.forEach(t => t.disabled = true);
+  clearInterval(tm); clearInterval(ovT); tas.forEach(t => t.disabled = true); phAdd.forEach(b => b && (b.disabled = true)); closeCam();
   $('ov').classList.add('hide'); $('cf').classList.add('hide');
   payload = mk(kind); window._kind = kind; show('v-end'); send();
 }
