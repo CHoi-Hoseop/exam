@@ -176,11 +176,16 @@ let cfg = null, entryTimer = null;
   } catch (e) { $('loadMsg').textContent = '서버 연결 실패. 네트워크 확인 후 새로고침하세요.'; }
 })();
 
+function winFor() {   // 학생이 고른 학년·반에 맞는 시간 (없으면 공통 시간)
+  const k = $('sg').value + $('sc').value, s = (cfg.sched || {})[k] || {};
+  return {open: s.open || cfg.openMs, close: s.close || cfg.closeMs};
+}
 function updEntry() {
-  const n = now(), st = $('status'), go = $('go');
-  if (cfg.openMs && n < cfg.openMs) { st.textContent = '오픈까지 ' + fmt(cfg.openMs - n); go.disabled = true; }
-  else if (cfg.closeMs && n > cfg.closeMs) { st.textContent = '마감되었습니다.'; go.disabled = true; }
-  else { st.textContent = '진행 중' + (cfg.closeMs ? ' · 마감까지 ' + fmt(cfg.closeMs - n) : ''); go.disabled = false; }
+  const n = now(), st = $('status'), go = $('go'), w = winFor();
+  if (cfg.sched && Object.keys(cfg.sched).length && !($('sg').value && $('sc').value)) { st.textContent = '학년·반을 선택하면 시간이 표시됩니다'; go.disabled = true; }
+  else if (w.open && n < w.open) { st.textContent = '오픈까지 ' + fmt(w.open - n); go.disabled = true; }
+  else if (w.close && n > w.close) { st.textContent = '마감되었습니다.'; go.disabled = true; }
+  else { st.textContent = '진행 중' + (w.close ? ' · 마감까지 ' + fmt(w.close - n) : ''); go.disabled = false; }
 }
 
 /* ── 전체화면 ── */
