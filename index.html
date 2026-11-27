@@ -55,6 +55,10 @@ button:disabled{opacity:.5}
 #cf{background:#000a}
 #cf .card{margin:0;color:var(--ink);max-width:460px;width:100%}
 #cf button{width:100%;margin-top:10px}
+.sidsel{display:flex;gap:6px}
+.sidsel select{flex:1;min-width:0;padding:10px 4px;border:1px solid var(--line);border-radius:8px;background:#fff;font:inherit}
+#pad{height:0}
+body.kb #pad{height:60vh}   /* 키보드가 올라와도 마지막 칸까지 스크롤되도록 아래 여백 확보 */
 </style>
 </head>
 <body>
@@ -65,7 +69,7 @@ button:disabled{opacity:.5}
   <div class="hero"><h1 id="title"></h1><div id="status"></div></div>
   <div class="card"><div class="sec">입장 정보</div>
     <div class="row3">
-      <div><label for="sid">학번 (5자리 숫자)</label><input id="sid" inputmode="numeric" pattern="[0-9]*" maxlength="5" autocomplete="off"></div>
+      <div><label>학년 · 반 · 번호</label><div class="sidsel"><select id="sg"></select><select id="sc"></select><select id="sn"></select></div><div class="muted" id="sidshow" style="min-height:20px"></div></div>
       <div><label for="nm">이름</label><input id="nm" autocomplete="off"></div>
       <div><label for="pin">입장 PIN (칠판 안내, 4자리)</label><input id="pin" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off"></div>
     </div>
@@ -86,6 +90,7 @@ button:disabled{opacity:.5}
     <img id="qi" class="hide" alt="안내 이미지">
     <div id="qs"></div>
     <div class="card"><button id="submit">제출하기</button></div>
+    <div id="pad"></div>
   </div>
 </div>
 
@@ -126,17 +131,25 @@ button:disabled{opacity:.5}
 
 <script>
 // ★ Apps Script 웹앱 배포 URL을 한 번만 붙여 넣으세요 (시험마다 수정 불필요)
-const API_URL = 'https://script.google.com/macros/s/AKfycbywLyrrZjUaalJDb2GmoGvuD4u2xEosHvzoAuem3lvVJykjyc470WCgYjoR2mmmPdisPA/exec';
+const API_URL = 'https://script.google.com/macros/s/여기에_배포ID/exec';
 
 const $ = i => document.getElementById(i);
 const EXAM = new URLSearchParams(location.search).get('id');
 const CODES = {NOEXAM:'존재하지 않는 시험입니다.',FORM:'학번·이름 형식을 확인하세요.',NOT_OPEN:'아직 시작 전입니다.',CLOSED:'마감되었습니다.',
   PIN:'입장 PIN이 올바르지 않습니다.',DUP:'이미 제출 기록이 있어 다시 응시할 수 없습니다.',ENTERED:'이미 입장 기록이 있습니다. 교사에게 문의하세요.'};
 
-/* ── 학번·PIN: 숫자만 입력 가능 ── */
-['sid', 'pin'].forEach(id => $(id).addEventListener('input', e => {
-  e.target.value = e.target.value.replace(/\D/g, '').slice(0, id === 'sid' ? 5 : 4);
-}));
+/* ── 학번: 학년·반·번호 선택 → 4자리 학번으로 자동 조합 (예: 2학년 3반 5번 → 2305) ── */
+const fill = (id, ph, from, to, suf) => {
+  const s = $(id); s.innerHTML = '<option value="">' + ph + '</option>';
+  for (let n = from; n <= to; n++) s.insertAdjacentHTML('beforeend', '<option value="' + n + '">' + n + suf + '</option>');
+};
+fill('sg', '학년', 1, 3, '학년'); fill('sc', '반', 1, 9, '반'); fill('sn', '번호', 1, 40, '번');   // 번호 최대값은 40 부분을 바꾸면 됩니다
+const showSid = () => {
+  const g = $('sg').value, c = $('sc').value, n = $('sn').value;
+  $('sidshow').textContent = g && c && n ? '학번: ' + g + c + n.padStart(2, '0') : '';
+};
+['sg', 'sc', 'sn'].forEach(id => $(id).addEventListener('change', showSid));
+$('pin').addEventListener('input', e => { e.target.value = e.target.value.replace(/\D/g, '').slice(0, 4); });
 
 /* ── 서버 시간 동기화 (태블릿 시계 무시, 경과시간은 performance.now 사용) ── */
 const T = {base:0, t0:0};
@@ -181,8 +194,8 @@ let closeMs = null, tm = null, v = 0, notes = [], payload = null;
 const err = m => $('err').textContent = m;
 
 $('go').onclick = async () => {
-  const sid = $('sid').value.trim(), name = $('nm').value.trim(), pin = $('pin').value.trim();
-  if (!/^\d{5}$/.test(sid)) return err('학번은 5자리 숫자로 입력하세요.');
+  if (!$('sg').value || !$('sc').value || !$('sn').value) return err('학년·반·번호를 모두 선택하세요.');
+  const sid = $('sg').value + $('sc').value + $('sn').value.padStart(2, '0'), name = $('nm').value.trim(), pin = $('pin').value.trim();
   if (!name) return err('이름을 입력하세요.');
   if (!/^\d{4}$/.test(pin)) return err('PIN은 4자리 숫자입니다.');
   if (cfg.photo && !camReady) {   // 카메라 촬영 문항이 있으면 시험 시작 전에 카메라 권한을 미리 받아 둠
@@ -241,6 +254,13 @@ function render(j) {   // 문항별 입력칸(글/사진/파일) 생성
         if (t.value.length - prev.length > 20) t.value = prev;
         prev = t.value; c.textContent = t.value.length.toLocaleString() + '자';
       });
+      t.addEventListener('focus', () => {   // 키보드가 올라오면 아래 여백을 늘리고 입력칸을 화면 가운데로
+        document.body.classList.add('kb');
+        setTimeout(() => t.scrollIntoView({block: 'center', behavior: 'smooth'}), 350);
+      });
+      t.addEventListener('blur', () => setTimeout(() => {
+        const a = document.activeElement; if (!a || a.tagName !== 'TEXTAREA') document.body.classList.remove('kb');
+      }, 250));
       d.append(t, c); tas.push(t);
     }
     if (hasCam || hasFile) {
@@ -425,6 +445,10 @@ async function send() {
   $('retry').classList.remove('hide');
 }
 $('retry').onclick = send;
+if (window.visualViewport) visualViewport.addEventListener('resize', () => {   // 키보드 높이가 바뀔 때마다 작성 중인 칸을 다시 보이게
+  const a = document.activeElement;
+  if (a && a.tagName === 'TEXTAREA') setTimeout(() => a.scrollIntoView({block: 'center'}), 120);
+});
 function done() {
   exitFS();
   $('endmsg').textContent = {정상:'제출이 완료되었습니다. 수고했습니다.',
