@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>수행평가</title>
+<style>
+:root{--ink:#1a1d2e;--mut:#555a75;--line:#cfd3ea;--pri:#4b3df2;--bad:#c62828;--ok:#1b7f3b}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:#e9ebf5;color:var(--ink);font-family:'Pretendard','Malgun Gothic','Apple SD Gothic Neo',system-ui,sans-serif;font-size:16px;line-height:1.6;
+-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+textarea,input{-webkit-user-select:text;user-select:text;font:inherit}
+.hide{display:none!important}
+.wrap{max-width:980px;margin:0 auto;padding:14px}
+.hero{background:linear-gradient(135deg,#4b3df2,#7a3cff);color:#fff;border-radius:14px;padding:16px 18px}
+.hero h1{margin:0;font-size:24px}.hero div{font-size:15px;opacity:.92;margin-top:4px;font-weight:700}
+.card{background:#fff;border-radius:12px;box-shadow:0 2px 12px rgba(20,20,60,.1);padding:14px 16px;margin-top:12px}
+.sec{font-weight:800;color:var(--pri);margin-bottom:6px;font-size:17px}
+.qt{white-space:pre-wrap;margin-bottom:10px}
+.card img{max-width:100%;border-radius:10px;display:block;margin:0 auto 10px}
+#intro{white-space:pre-wrap}
+label{display:block;font-weight:700;font-size:14px;margin:10px 0 3px}
+input,textarea{width:100%;border:1px solid var(--line);border-radius:8px;padding:10px;background:#fff}
+textarea{resize:none}
+.ta{min-height:240px;line-height:1.7;border:1.5px solid var(--line)}
+.len{text-align:right;color:var(--mut);font-size:13px;margin-top:3px}
+button{border:0;border-radius:10px;padding:13px 18px;font:inherit;font-weight:800;cursor:pointer;background:var(--pri);color:#fff}
+button.sub{background:#fff;color:var(--pri);border:1.5px solid var(--pri)}
+button:disabled{opacity:.5}
+.row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+@media(max-width:600px){.row3{grid-template-columns:1fr}}
+.err{color:var(--bad);white-space:pre-line;font-weight:700;min-height:24px;margin-top:8px}
+.muted{color:var(--mut);font-size:13px}
+#bar{position:sticky;top:0;z-index:5;display:flex;gap:12px;align-items:center;justify-content:space-between;padding:10px 16px;background:#1a1d2e;color:#fff;flex-wrap:wrap}
+#bar b{font-size:20px}
+#warn{background:#f59e0b;color:#000;padding:4px 10px;border-radius:8px;font-size:14px;font-weight:700}
+.overlay{position:fixed;inset:0;z-index:99;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px;color:#fff}
+#ov{background:rgba(190,10,10,.97)}
+#ov h2{font-size:30px;margin:0 0 10px}
+#cnt{font-size:130px;font-weight:800;line-height:1.1}
+#ov button{background:#fff;color:#b00;max-width:420px;width:100%}
+#cf{background:#000a}
+#cf .card{margin:0;color:var(--ink);max-width:460px;width:100%}
+#cf button{width:100%;margin-top:10px}
+</style>
+</head>
+<body>
+
+<div id="v-load" class="wrap"><div class="card"><p id="loadMsg">불러오는 중…</p></div></div>
+
+<div id="v-entry" class="wrap hide">
+  <div class="hero"><h1 id="title"></h1><div id="status"></div></div>
+  <div class="card"><div class="sec">입장 정보</div>
+    <div class="row3">
+      <div><label for="sid">학번 (5자리 숫자)</label><input id="sid" inputmode="numeric" maxlength="5" autocomplete="off"></div>
+      <div><label for="nm">이름</label><input id="nm" autocomplete="off"></div>
+      <div><label for="pin">입장 PIN (칠판 안내, 4자리)</label><input id="pin" inputmode="numeric" maxlength="4" autocomplete="off"></div>
+    </div>
+    <div class="err" id="err"></div>
+    <button id="go">평가 시작하기</button>
+    <p class="muted" style="margin-top:12px">시작하면 전체화면으로 전환됩니다. 전체화면 해제·화면 전환·분할화면 등 이탈은 감지되며, 1회 경고 후 2회째에는 즉시 자동 제출·잠금됩니다.</p>
+  </div>
+</div>
+
+<div id="v-exam" class="hide">
+  <div id="bar">
+    <div id="who"></div>
+    <span id="warn" class="hide">경고 1/1회 사용됨</span>
+    <div>남은 시간 <b id="rem">--:--</b></div>
+  </div>
+  <div class="wrap">
+    <div id="intro" class="card hide"></div>
+    <img id="qi" class="hide" alt="안내 이미지">
+    <div id="qs"></div>
+    <div class="card"><button id="submit">제출하기</button></div>
+  </div>
+</div>
+
+<div id="v-end" class="wrap hide"><div class="card">
+  <div class="sec">평가 종료</div>
+  <p id="endmsg"></p>
+  <button id="retry" class="hide">다시 전송</button>
+</div></div>
+
+<div id="ov" class="overlay hide">
+  <h2>⚠ 평가 화면을 벗어났습니다</h2>
+  <p>5초 안에 아래 버튼을 눌러 복귀하세요.<br>시간이 지나거나 다시 이탈하면 즉시 자동 제출·잠금됩니다.</p>
+  <div id="cnt">5</div>
+  <p id="ovmsg"></p>
+  <button id="back">시험 화면으로 복귀</button>
+</div>
+
+<div id="cf" class="overlay hide">
+  <div class="card">
+    <div class="sec">제출하시겠습니까?</div>
+    <p id="cfmsg">제출 후에는 수정할 수 없습니다.</p>
+    <button id="yes">제출</button>
+    <button id="no" class="sub">계속 작성</button>
+  </div>
+</div>
+
+<script>
+// ★ Apps Script 웹앱 배포 URL을 한 번만 붙여 넣으세요 (시험마다 수정 불필요)
+const API_URL = 'https://script.google.com/macros/s/여기에_배포ID/exec';
+
+const $ = i => document.getElementById(i);
+const EXAM = new URLSearchParams(location.search).get('id');
+const CODES = {NOEXAM:'존재하지 않는 시험입니다.',FORM:'학번·이름 형식을 확인하세요.',NOT_OPEN:'아직 시작 전입니다.',CLOSED:'마감되었습니다.',
+  PIN:'입장 PIN이 올바르지 않습니다.',DUP:'이미 제출 기록이 있어 다시 응시할 수 없습니다.',ENTERED:'이미 입장 기록이 있습니다. 교사에게 문의하세요.'};
+
+/* ── 서버 시간 동기화 (태블릿 시계 무시, 경과시간은 performance.now 사용) ── */
+const T = {base:0, t0:0};
+const sync = ms => { T.base = ms; T.t0 = performance.now(); };
+const now = () => T.base + (performance.now() - T.t0);
+const fmt = ms => { const s = Math.max(0, Math.floor(ms/1000)), h = Math.floor(s/3600), m = Math.floor(s%3600/60), x = s%60;
+  return (h ? h+':' : '') + String(m).padStart(2,'0') + ':' + String(x).padStart(2,'0'); };
+const show = v => ['v-load','v-entry','v-exam','v-end'].forEach(i => $(i).classList.toggle('hide', i !== v));
+const api = async o => (await fetch(API_URL, {method:'POST', body:JSON.stringify(o)})).json();
+
+let cfg = null, entryTimer = null;
+(async () => {
+  if (!EXAM) return $('loadMsg').textContent = '주소에 시험 ID가 없습니다. 교사가 안내한 QR/주소로 접속하세요.';
+  try {
+    const j = await (await fetch(API_URL + '?action=info&id=' + encodeURIComponent(EXAM))).json();
+    if (!j.ok) return $('loadMsg').textContent = CODES[j.code] || '시험 정보를 불러올 수 없습니다.';
+    cfg = j; sync(j.now); $('title').textContent = j.title; show('v-entry');
+    entryTimer = setInterval(updEntry, 500); updEntry();
+  } catch (e) { $('loadMsg').textContent = '서버 연결 실패. 네트워크 확인 후 새로고침하세요.'; }
+})();
+
+function updEntry() {
+  const n = now(), st = $('status'), go = $('go');
+  if (cfg.openMs && n < cfg.openMs) { st.textContent = '오픈까지 ' + fmt(cfg.openMs - n); go.disabled = true; }
+  else if (cfg.closeMs && n > cfg.closeMs) { st.textContent = '마감되었습니다.'; go.disabled = true; }
+  else { st.textContent = '진행 중' + (cfg.closeMs ? ' · 마감까지 ' + fmt(cfg.closeMs - n) : ''); go.disabled = false; }
+}
+
+/* ── 전체화면 ── */
+const fsEl = () => document.fullscreenElement || document.webkitFullscreenElement;
+async function enterFS() {
+  const el = document.documentElement, f = el.requestFullscreen || el.webkitRequestFullscreen;
+  if (!f) throw 0;
+  await f.call(el); await new Promise(r => setTimeout(r, 100));
+  if (!fsEl()) throw 0;
+}
+function exitFS() { try { (document.exitFullscreen || document.webkitExitFullscreen).call(document); } catch (e) {} }
+
+/* ── 입장 ── */
+let user = null, started = false, armed = false, locked = false, busy = false;
+let closeMs = null, tm = null, v = 0, notes = [], payload = null;
+const err = m => $('err').textContent = m;
+
+$('go').onclick = async () => {
+  const sid = $('sid').value.trim(), name = $('nm').value.trim(), pin = $('pin').value.trim();
+  if (!/^\d{5}$/.test(sid)) return err('학번은 5자리 숫자로 입력하세요.');
+  if (!name) return err('이름을 입력하세요.');
+  if (!/^\d{4}$/.test(pin)) return err('PIN은 4자리 숫자입니다.');
+  $('go').disabled = true; err('확인 중…');
+  try { await enterFS(); } catch (e) { err('전체화면을 허용해야 시작할 수 있습니다.'); return updEntry(); }
+  let j;
+  try { j = await api({action:'start', id:EXAM, sid, name, pin}); }
+  catch (e) { exitFS(); err('서버 연결 실패. 다시 시도하세요.'); return updEntry(); }
+  if (!j.ok) { exitFS(); err(CODES[j.code] || '오류(' + j.code + ')'); return updEntry(); }
+  clearInterval(entryTimer);
+  user = {sid, name, token:j.token}; sync(j.now); closeMs = j.closeMs;
+  render(j);
+  $('who').textContent = sid + ' ' + name;
+  show('v-exam'); started = true; setTimeout(() => armed = true, 800);
+  tm = setInterval(tick, 250); tick();
+};
+
+function tick() {
+  if (!closeMs) return $('rem').textContent = '--:--';
+  const r = closeMs - now(); $('rem').textContent = fmt(r);
+  if (r <= 0) finish('마감자동');
+}
+
+/* ── 입력 보안 ── */
+const tas = []; let qlist = [];
+['copy','cut','paste','contextmenu','dragstart','drop'].forEach(t => document.addEventListener(t, e => e.preventDefault()));
+document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && 'cvxa'.includes(e.key.toLowerCase())) e.preventDefault(); });
+function render(j) {   // 문항별 입력칸 생성
+  qlist = j.questions || [];
+  if (j.intro) { $('intro').textContent = j.intro; $('intro').classList.remove('hide'); }
+  if (j.introImg) { $('qi').src = j.introImg; $('qi').classList.remove('hide'); }
+  qlist.forEach(q => {
+    const d = document.createElement('div'); d.className = 'card';
+    const hd = document.createElement('div'); hd.className = 'sec';
+    hd.textContent = (qlist.length > 1 ? '문항 ' + q.no : '문제') + (q.pts ? ' (' + q.pts + '점)' : '');
+    const p = document.createElement('div'); p.className = 'qt'; p.textContent = q.text;
+    d.append(hd, p);
+    if (q.img) { const im = document.createElement('img'); im.src = q.img; im.alt = '문제 이미지'; d.append(im); }
+    const t = document.createElement('textarea'); t.className = 'ta'; t.placeholder = '여기에 답안을 작성하세요.';
+    t.spellcheck = false; t.autocomplete = 'off'; t.setAttribute('autocorrect', 'off'); t.setAttribute('autocapitalize', 'off');
+    const c = document.createElement('div'); c.className = 'len'; c.textContent = '0자';
+    let prev = '';
+    t.addEventListener('beforeinput', e => { if (/Paste|Drop/.test(e.inputType || '')) e.preventDefault(); });
+    t.addEventListener('input', () => {   // 클립보드 등으로 한꺼번에 길게 들어오면 되돌림
+      if (t.value.length - prev.length > 20) t.value = prev;
+      prev = t.value; c.textContent = t.value.length.toLocaleString() + '자';
+    });
+    d.append(t, c); $('qs').append(d); tas.push(t);
+  });
+}
+
+/* ── 이탈 감지 (1회 경고 → 2회 즉시 잠금) ── */
+let ovT = null, dl = 0;
+function leave(why) {
+  if (!started || !armed || locked || busy) return;
+  busy = true; v++; notes.push('이탈' + v + ': ' + why);   // busy: 복귀 전까지 중복 이벤트 무시
+  if (v >= 2) return finish('이탈강제');
+  $('ovmsg').textContent = ''; $('ov').classList.remove('hide');
+  dl = performance.now() + 5000; tickOv(); ovT = setInterval(tickOv, 100);
+}
+function tickOv() {
+  const r = Math.ceil((dl - performance.now()) / 1000);
+  if (r <= 0) { clearInterval(ovT); return finish('이탈강제'); }
+  $('cnt').textContent = r;
+}
+$('back').onclick = async () => {
+  if (performance.now() > dl) return;
+  try { await enterFS(); } catch (e) { return $('ovmsg').textContent = '전체화면 복귀 실패. 다시 눌러 주세요.'; }
+  clearInterval(ovT); $('ov').classList.add('hide'); $('warn').classList.remove('hide');
+  setTimeout(() => busy = false, 800);   // 복귀 직후 늦게 도착하는 이벤트 흡수
+};
+const fsChange = () => { if (!fsEl()) leave('전체화면 해제'); };
+document.addEventListener('fullscreenchange', fsChange);
+document.addEventListener('webkitfullscreenchange', fsChange);
+document.addEventListener('visibilitychange', () => { if (document.hidden) leave('탭 전환/홈 이동'); });
+window.addEventListener('blur', () => leave('분할화면/팝업 등 창 이탈'));
+window.addEventListener('pagehide', () => {   // 새로고침·닫기: 현재 답안을 강제 제출
+  if (!started || locked) return; locked = true;
+  notes.push('페이지 이탈/새로고침');
+  navigator.sendBeacon(API_URL, JSON.stringify(mk('이탈강제')));
+});
+
+/* ── 제출 ── */
+$('submit').onclick = () => {
+  const e = tas.filter(t => !t.value.trim()).length;
+  $('cfmsg').textContent = (e ? '미작성 문항이 ' + e + '개 있습니다. ' : '') + '제출 후에는 수정할 수 없습니다.';
+  $('cf').classList.remove('hide');
+};
+$('no').onclick = () => $('cf').classList.add('hide');
+$('yes').onclick = () => finish('정상');
+const mk = kind => ({action:'submit', id:EXAM, sid:user.sid, name:user.name, token:user.token, answers:tas.map(t => t.value), kind, note:notes.join(' / ')});
+
+async function finish(kind) {
+  if (locked) return; locked = true;
+  clearInterval(tm); clearInterval(ovT); tas.forEach(t => t.disabled = true);
+  $('ov').classList.add('hide'); $('cf').classList.add('hide');
+  payload = mk(kind); window._kind = kind; show('v-end'); send();
+}
+async function send() {
+  $('retry').classList.add('hide'); $('endmsg').textContent = '제출 중입니다. 화면을 닫지 마세요.';
+  for (let i = 0; i < 3; i++) {
+    try { const j = await api(payload); if (j.ok) return done(); if (j.code === 'TOKEN') break; } catch (e) {}
+    await new Promise(r => setTimeout(r, 1500));
+  }
+  $('endmsg').textContent = '전송에 실패했습니다. 네트워크를 확인하고 [다시 전송]을 누르세요.';
+  $('retry').classList.remove('hide');
+}
+$('retry').onclick = send;
+function done() {
+  exitFS();
+  $('endmsg').textContent = {정상:'제출이 완료되었습니다. 수고했습니다.',
+    마감자동:'마감 시간이 되어 작성 내용이 자동 제출되었습니다.',
+    이탈강제:'화면 이탈로 작성 내용이 자동 제출되고 잠금되었습니다. 교사에게 문의하세요.'}[window._kind];
+}
+</script>
+</body>
+</html>
